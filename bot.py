@@ -30,16 +30,16 @@ from aiogram.exceptions import TelegramBadRequest
 load_dotenv()
 
 # ==================== CONFIG ====================
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "").lstrip("@")
-ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
+BOT_TOKEN = os.getenv("8669573949:AAFWKdWp8njdHNuBLlzg__dBb9Z-N9YsiCg")
+REQUIRED_CHANNEL = os.getenv("https://t.me/V2ray_company ", "").lstrip("@")
+ADMIN_IDS = [int(x.strip()) for x in os.getenv("7277847715", "").split(",") if x.strip().isdigit()]
 ZEUS_SOURCE_URL = os.getenv(
     "ZEUS_SOURCE_URL",
     "https://raw.githubusercontent.com/panel-zeus/Z-E-U-S/main/Source.js"
 )
 DB_PATH = os.getenv("DB_PATH", "ezpanel.db")
 
-if not BOT_TOKEN:
+if not BOT_TOKEN:ي
     raise RuntimeError("BOT_TOKEN is required")
 
 logging.basicConfig(
