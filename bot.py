@@ -186,50 +186,31 @@ class CloudflareClient:
             return None
 
     async def enable_workers_subdomain(self, account_id: str, subdomain: str = None) -> str:
-        # First try to get existing
         existing = await self.get_workers_subdomain(account_id)
         if existing:
             return existing
-        # Create one (random-ish)
         import random, string
         sub = subdomain or ("zeus" + "".join(random.choices(string.ascii_lowercase + string.digits, k=8)))
         try:
             data = await self._request("PUT", f"/accounts/{account_id}/workers/subdomain", json={"subdomain": sub})
             return data.get("result", {}).get("subdomain", sub)
         except Exception:
-            # Fallback: some accounts already have one
             return existing or sub
 
     async def deploy_worker(self, account_id: str, script_name: str, script_content: str,
                             d1_id: str, compatibility_date: str = "2024-11-01") -> Dict:
-        """Upload worker with D1 binding using multipart form"""
         metadata = {
             "main_module": "index.js",
             "compatibility_date": compatibility_date,
-            "bindings": [
-                {
-                    "type": "d1",
-                    "name": "DB",
-                    "id": d1_id
-                }
-            ]
+            "bindings": [{"type": "d1", "name": "DB", "id": d1_id}]
         }
 
         form = aiohttp.FormData()
-        form.add_field(
-            "metadata",
-            json.dumps(metadata),
-            content_type="application/json"
-        )
-        form.add_field(
-            "index.js",
-            script_content,
-            filename="index.js",
-            content_type="application/javascript+module"
-        )
+        form.add_field("metadata", json.dumps(metadata), content_type="application/json")
+        form.add_field("index.js", script_content, filename="index.js", content_type="application/javascript+module")
 
         url = f"{self.BASE}/accounts/{account_id}/workers/scripts/{script_name}"
-        headers = {"Authorization": f"Bearer {self.token}"}  # no Content-Type for multipart
+        headers = {"Authorization": f"Bearer {self.token}"}
 
         async with aiohttp.ClientSession() as session:
             async with session.put(url, headers=headers, data=form) as resp:
@@ -241,7 +222,6 @@ class CloudflareClient:
                 return data.get("result", {})
 
     async def enable_workers_dev(self, account_id: str, script_name: str) -> bool:
-        """Enable *.workers.dev route for the script"""
         try:
             await self._request(
                 "POST",
@@ -282,12 +262,10 @@ def sponsor_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📥 ربات دانلودر اینستاگرام رایگان", url="https://t.me/FaraDownloaderBot")],
         [InlineKeyboardButton(text="🔐 آموزش و فروش V2ray_company | VPN", url="https://t.me/V2ray_company")],
-        [InlineKeyboardButton(text="✅ عضویت در کانال (اجباری)", url=f"https://t.me/{REQUIRED_CHANNEL}" if REQUIRED_CHANNEL else "https://t.me/")],
-        [InlineKeyboardButton(text="🔄 بررسی عضویت و ورود به ربات", callback_data="check_join")],
+        [InlineKeyboardButton(text="✅ پشتیبانی", callback_data="support")],          # رنگ قرمز
     ])
 
 def cf_token_kb() -> InlineKeyboardMarkup:
-    # لینک کامل‌تر شامل User Details Read + تمام پرمیشن‌های لازم
     token_url = (
         "https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys="
         "%5B%7B%22key%22%3A%22workers_scripts%22%2C%22type%22%3A%22edit%22%7D%2C"
@@ -398,43 +376,20 @@ async def process_cf_token(message: Message, state: FSMContext):
     try:
         cf = CloudflareClient(token)
 
-        # ۱. اول اکانت‌ها را بگیر (مهم‌ترین بخش)
-        try:
-            accounts = await cf.get_accounts()
-        except Exception as e:
-            raise Exception(
-                f"دسترسی به اکانت‌ها ممکن نیست.\n"
-                f"مطمئن شوید توکن را با لینک جدید ربات ساخته‌اید و "
-                f"پرمیشن Account Settings Read فعال است.\n\nجزئیات: {str(e)[:150]}"
-            )
-
+        accounts = await cf.get_accounts()
         if not accounts:
-            await wait_msg.edit_text("❌ هیچ اکانتی در این توکن یافت نشد. توکن را دوباره با دسترسی کامل بسازید.")
+            await wait_msg.edit_text("❌ هیچ اکانتی در این توکن یافت نشد.")
             return
 
         account = accounts[0]
         account_id = account["id"]
-        account_name = account.get("name") or account_id[:12]
+        email = account.get("name") or account_id[:12]
 
-        # ۲. سعی کن ایمیل را بگیری (اختیاری)
-        email = account_name
         try:
             user_info = await cf.get_user()
             if user_info.get("email"):
                 email = user_info["email"]
         except Exception:
-            # اگر پرمیشن User Details نداشت، مشکلی نیست
-            pass
-
-        # ۳. توکن را verify کن (اختیاری ولی خوب است)
-        try:
-            verify = await cf.verify_token()
-            status = verify.get("result", {}).get("status")
-            if status and status != "active":
-                await wait_msg.edit_text("❌ توکن غیرفعال است.")
-                return
-        except Exception:
-            # بعضی توکن‌ها verify را پشتیبانی نمی‌کنند، رد شو
             pass
 
         await save_cf_account(
@@ -456,11 +411,7 @@ async def process_cf_token(message: Message, state: FSMContext):
         logger.exception("Token verification failed")
         error_text = str(e)
         if "403" in error_text or "Unauthorized" in error_text:
-            error_text = (
-                "دسترسی غیرمجاز (403)\n\n"
-                "لطفاً توکن را دوباره با لینک جدید داخل ربات بسازید و "
-                "مطمئن شوید همه پرمیشن‌ها (به‌خصوص Account Settings Read و User Details Read) فعال هستند."
-            )
+            error_text = "دسترسی غیرمجاز (403)\n\nلطفاً توکن را دوباره با دسترسی کامل بسازید."
         await wait_msg.edit_text(f"❌ خطا در بررسی توکن:\n<code>{error_text[:350]}</code>", parse_mode=ParseMode.HTML)
 
 @router.callback_query(F.data == "new_panel")
@@ -468,8 +419,7 @@ async def cb_new_panel(callback: CallbackQuery):
     accounts = await get_user_accounts(callback.from_user.id)
     if not accounts:
         await callback.message.edit_text(
-            "⚠️ هیچ اکانت کلودفلری یافت نشد!\n\n"
-            "لطفاً ابتدا از منوی اصلی روی «➕ ثبت اکانت کلودفلر» کلیک کنید.",
+            "⚠️ هیچ اکانت کلودفلری یافت نشد!\n\nلطفاً ابتدا از منوی اصلی روی «➕ ثبت اکانت کلودفلر» کلیک کنید.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="➕ ثبت اکانت کلودفلر", callback_data="add_cf_account")],
                 [InlineKeyboardButton(text="🔙 بازگشت", callback_data="back_main")]
@@ -478,8 +428,7 @@ async def cb_new_panel(callback: CallbackQuery):
         return
 
     await callback.message.edit_text(
-        "🚀 <b>تایید استقرار پنل</b>\n\n"
-        "برای ساخت پنل جدید روی اکانت زیر کلیک کنید:",
+        "🚀 <b>تایید استقرار پنل</b>\n\nبرای ساخت پنل جدید روی اکانت زیر کلیک کنید:",
         reply_markup=accounts_kb(accounts, prefix="deploy"),
         parse_mode=ParseMode.HTML
     )
@@ -499,14 +448,11 @@ async def cb_deploy(callback: CallbackQuery):
         account_id = account["account_id"]
         email = account.get("email") or "user"
 
-        # 1. Download source
         await callback.message.edit_text("📥 دانلود سورس پنل زئوس...")
         source = await download_zeus_source()
 
-        # 2. Create or reuse D1
         await callback.message.edit_text("🗄️ ساخت دیتابیس D1...")
         d1_name = f"zeus-db-{callback.from_user.id}-{int(datetime.now().timestamp()) % 100000}"
-        # Check existing d1 with similar name? for simplicity always create new or reuse first
         existing_d1s = await cf.list_d1(account_id)
         d1_id = None
         for d in existing_d1s:
@@ -516,29 +462,20 @@ async def cb_deploy(callback: CallbackQuery):
         if not d1_id:
             d1 = await cf.create_d1(account_id, d1_name)
             d1_id = d1.get("uuid")
-            if not d1_id:
-                raise Exception("نتوانستیم D1 بسازیم")
 
-        # 3. Worker name
         worker_name = f"zeus-{callback.from_user.id}-{int(datetime.now().timestamp()) % 10000}"
         worker_name = re.sub(r"[^a-z0-9-]", "", worker_name.lower())[:50]
 
-        # 4. Deploy
         await callback.message.edit_text("🚀 آپلود و فعال‌سازی ورکر...")
         await cf.deploy_worker(account_id, worker_name, source, d1_id)
-
-        # 5. Enable workers.dev
         await cf.enable_workers_dev(account_id, worker_name)
 
-        # 6. Get subdomain
         subdomain = await cf.get_workers_subdomain(account_id)
         if not subdomain:
             subdomain = await cf.enable_workers_subdomain(account_id)
 
-        # پنل زئوس روی مسیر /panel باز می‌شود (راحت‌تر برای کاربر)
         panel_url = f"https://{worker_name}.{subdomain}.workers.dev/panel"
 
-        # 7. Save
         await update_panel_info(
             callback.from_user.id, account_id,
             worker_name, panel_url, d1_id
@@ -560,8 +497,7 @@ async def cb_deploy(callback: CallbackQuery):
     except Exception as e:
         logger.exception("Deploy failed")
         await callback.message.edit_text(
-            f"❌ خطا در ساخت پنل:\n<code>{str(e)[:400]}</code>\n\n"
-            "اگر خطا مربوط به دسترسی است، مطمئن شوید توکن تمام پرمیشن‌های لازم را دارد.",
+            f"❌ خطا در ساخت پنل:\n<code>{str(e)[:400]}</code>\n\nاگر خطا مربوط به دسترسی است، مطمئن شوید توکن تمام پرمیشن‌های لازم را دارد.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔙 بازگشت", callback_data="back_main")]
             ]),
@@ -580,7 +516,6 @@ async def cb_manage(callback: CallbackQuery):
         )
         return
 
-    # فقط اکانت‌هایی که پنل دارند
     deployed = [a for a in accounts if a.get("panel_url")]
     if not deployed:
         await callback.message.edit_text(
@@ -593,8 +528,7 @@ async def cb_manage(callback: CallbackQuery):
         return
 
     await callback.message.edit_text(
-        "⚙️ <b>مدیریت و آپدیت پنل‌ها</b>\n\n"
-        "روی پنل مورد نظر کلیک کنید تا آپدیت شود:",
+        "⚙️ <b>مدیریت و آپدیت پنل‌ها</b>\n\nروی پنل مورد نظر کلیک کنید تا آپدیت شود:",
         reply_markup=accounts_kb(deployed, prefix="update"),
         parse_mode=ParseMode.HTML
     )
@@ -614,7 +548,6 @@ async def cb_update(callback: CallbackQuery):
         source = await download_zeus_source()
         d1_id = account.get("d1_id")
         if not d1_id:
-            # try find one
             d1s = await cf.list_d1(account["account_id"])
             for d in d1s:
                 if d.get("name", "").startswith("zeus"):
@@ -635,8 +568,7 @@ async def cb_update(callback: CallbackQuery):
             [InlineKeyboardButton(text="🔙 منوی اصلی", callback_data="back_main")]
         ])
         await callback.message.edit_text(
-            f"✅ پنل با موفقیت آپدیت شد!\n\n"
-            f"🔗 <code>{account['panel_url']}</code>",
+            f"✅ پنل با موفقیت آپدیت شد!\n\n🔗 <code>{account['panel_url']}</code>",
             reply_markup=kb,
             parse_mode=ParseMode.HTML
         )
@@ -649,6 +581,17 @@ async def cb_update(callback: CallbackQuery):
             ]),
             parse_mode=ParseMode.HTML
         )
+
+@router.callback_query(F.data == "support")
+async def cb_support(callback: CallbackQuery):
+    try:
+        await callback.bot.send_message(
+            chat_id="https://t.me/+JArqswroP-QyMTJk",
+            text="💬 کاربر از دکمه پشتیبانی استفاده کرد."
+        )
+        await callback.answer("✅ شما به گروه پشتیبانی منتقل شدید!", show_alert=True)
+    except Exception as e:
+        await callback.answer(f"❌ خطا: {str(e)}", show_alert=True)
 
 # ==================== MAIN ====================
 async def main():
